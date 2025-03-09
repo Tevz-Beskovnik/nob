@@ -5,10 +5,7 @@ int main (int argc, char *argv[])
 {
     REBUILD_SELF(argc, argv);
 
-    cmd_list command = { "echo", "test" };
-    run_command_sync(&command);
-    cmd_list command2 = { "echo", "test2" };
-    run_command_sync(&command2);
-    //COMMAND("echo", "test2");
+    COMMAND("g++", "-Wall", "-Werror", "-Wpedantic", "-o", "./example/main", "./example/main.cpp");
+    COMMAND("./example/main");
     return 0;
 }

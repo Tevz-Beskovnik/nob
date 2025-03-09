@@ -7,19 +7,14 @@
  */
 
 #pragma once
-#include <_stdio.h>
 #include <assert.h>
 #include <cerrno>
-#include <cstdarg>
-#include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
 #include <iostream>
 #include <string>
 #include <vector>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 
 typedef std::vector<const char*> cmd_list;
 typedef std::vector<const char*> source_list;
@@ -31,7 +26,9 @@ typedef std::vector<const char*> source_list;
 # define REBUILD_SELF_AND_WATCH(argc, argv, ...) go_rebuild_self(argc, argv, __FILE__, __VA_ARGS__)
 #endif
 
-#define COMMAND(...) cmd_list cmd_##__LINE__ = { __VA_ARGS__ }; run_command_sync(&cmd_##__LINE__)
+#ifndef COMMAND
+# define COMMAND(...) { cmd_list cmd = { __VA_ARGS__ }; run_command_sync(&cmd); }
+#endif
 
 // currently only supporting 
 #ifndef REBUILD_SELF_PARAMS
@@ -54,26 +51,20 @@ enum class log_level
 void _log(log_level lvl, const char* output, ...);
 void output_command(const cmd_list *command);
 int run_command_sync(cmd_list *command);
+int run_command_async(cmd_list *command);
 int should_rebuild_self(const char *binary, source_list sources);
 int rename_file(const char *file, const char *new_file);
+int wait_for_command(pid_t pid);
+void run_command_sync_no_fork(cmd_list *command);
 
-inline void go_rebuild_self(int argc, char *const argv[], const char* source_file, ...)
+template<typename... T>
+inline void go_rebuild_self(int argc, char **argv, const char* source_file, T... args)
 {
     const char *binary_path = shift_args(argc, argv);
-    source_list sources = { source_file };
-
-    va_list args;
-    va_start(args, source_file);
-    while(1)
-    {
-        const char *path = va_arg(args, const char*);
-        if(path == NULL) break;
-        sources.push_back(path);
-    }
-    va_end(args);
+    source_list sources = { args... };
+    sources.push_back(source_file);
 
     int rebuild_needed = should_rebuild_self(binary_path, sources);
-
     if(rebuild_needed < 0)
     {
         _log(log_level::error, "Something went wrong while determening if rebuild is needed");
@@ -93,7 +84,7 @@ inline void go_rebuild_self(int argc, char *const argv[], const char* source_fil
     if(run_command_sync(&cmd) < 0)
     {
         _log(log_level::error, "Error while trying to rebuild self");
-        return;
+        exit(1);
     }
 
     _log(log_level::info, "Trying to delete %s executable", old_binary_path.c_str());
@@ -104,10 +95,7 @@ inline void go_rebuild_self(int argc, char *const argv[], const char* source_fil
 
     cmd_list exec_bin = { binary_path };
     for(int i = 0; i < argc; i++) exec_bin.push_back(argv[i]);
-    if(run_command_sync(&exec_bin) < 0) {
-        _log(log_level::error, "Failed to start executable");
-        exit(0);
-    }
+    run_command_sync_no_fork(&exec_bin);
 }
 
 inline void output_command(const cmd_list* command)
@@ -119,10 +107,44 @@ inline void output_command(const cmd_list* command)
         output += ' ';
     }
 
-    _log(log_level::info, output.c_str());
+    _log(log_level::info, "CMD: %s", output.c_str());
+}
+
+inline int run_command_async(cmd_list* command)
+{
+    assert(command->size() > 0);
+
+    pid_t cpid = fork();
+    if(cpid < 0)
+    {
+        _log(log_level::error, "Error while trying to fork process: %s", cpid);
+        exit(1);
+    }
+
+    if(cpid == 0) // if cpid 0 we're in child process
+    {
+        cmd_list command_null { *command };
+        command_null.push_back(NULL);
+
+        output_command(command);
+
+        if(execvp((*command)[0], (char* const*)command_null.data()) < 0) // this will exit out with the signal the calling command returns
+        {
+            _log(log_level::error, "Error while calling command: %s\n", strerror(errno));
+            exit(1);
+        }
+    }
+
+    return cpid;
 }
 
 inline int run_command_sync(cmd_list* command)
+{
+    pid_t pid = run_command_async(command);
+    return wait_for_command(pid);
+}
+
+inline void run_command_sync_no_fork(cmd_list *command)
 {
     assert(command->size() > 0);
 
@@ -131,13 +153,42 @@ inline int run_command_sync(cmd_list* command)
 
     output_command(command);
 
-    if(execvp((*command)[0], (char* const*)command_null.data()) < 0)
+    if(execvp((*command)[0], (char* const*)command_null.data()) < 0) // this will exit out with the signal the calling command returns
     {
         _log(log_level::error, "Error while calling command: %s\n", strerror(errno));
-        return -1;
+        exit(1);
+    }
+}
+
+inline int wait_for_command(pid_t pid) 
+{
+    while(1) 
+    {
+        int status;
+        if(waitpid(pid, &status, 0) < 0)
+        {
+            _log(log_level::error, "Error trying to wait for command: %s", strerror(errno));
+            return -1;
+        }
+
+        if(WIFEXITED(status))
+        {
+            int exit_status = WEXITSTATUS(status);
+            if(exit_status != 0)
+            {
+                _log(log_level::error, "Exit signal from command was not 0");
+                return -1;
+            }
+            return 0;
+        };
+        if(WIFSIGNALED(status) || WIFSTOPPED(status) || WCOREDUMP(status))
+        {
+            _log(log_level::error, "Error while executing command");
+            return -1;
+        };
     }
 
-    return 0;
+    return 1;
 }
 
 inline int should_rebuild_self(const char *binary, source_list sources)
@@ -156,6 +207,7 @@ inline int should_rebuild_self(const char *binary, source_list sources)
     {
         if(stat(file, &file_stat) < 0)
         {
+            if(errno == ENOENT) continue;
             _log(log_level::error, "Failed getting stat for %s error: %s", file, strerror(errno));
             return -1;
         }

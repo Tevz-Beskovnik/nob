@@ -8,4 +8,32 @@ Essentialy it is a no-build system concept where the only thing you need to buil
 
 However nob is mostlikely not suitable for you if you are relying on external dependencies, via CMake. It's mostly a helper tool to run commands in the shell for you.
 
-## How to use it
+## How to use nob
+
+Create a file named `nob.cpp`, thats where all your compile commands will go, in that file you want to include `nob.h` and the code to automaticly rebuild if the build file changes:
+
+```cpp
+#include "nob.h"
+
+int main (int argc, char *argv[])
+{
+    REBUILD_SELF(argc, argv); // this command checks for changes for itself and utomaticly rebuilds if needed
+    // alternitavely if you have external dependecies to your build file you add them to the watch list too
+    // REBUILD_SELF_AND_WATCH(argc, argv, "./path/to/dependency", ...);
+
+    return 0;
+}
+
+```
+
+To call a command from the main function just use the `COMMAND()` macro, to run any shell command, space separated commands/arguemts should be separated by a comma:
+
+```cpp
+COMMAND("echo", "foo");
+
+COMMAND("g++", "-Wall", "-Werror", "-o", "out", "foo.cpp");
+
+//... and so on
+```
+
+**More features are to come**
