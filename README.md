@@ -36,4 +36,13 @@ COMMAND("g++", "-Wall", "-Werror", "-o", "out", "foo.cpp");
 //... and so on
 ```
 
+## TODO
+
+- [x] Rebuild self macro.
+- [x] Command macros.
+- [ ] Create directory macros.
+- [ ] Remove directory macros.
+- [ ] Remove directory recursive macros.
+- [ ] Delete file macros.
+
 **More features are to come**

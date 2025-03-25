@@ -9,15 +9,18 @@
 #pragma once
 #include <assert.h>
 #include <cerrno>
+#include <cstring>
 #include <iostream>
 #include <string>
 #include <vector>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 
 typedef std::vector<const char*> cmd_list;
 typedef std::vector<const char*> source_list;
+typedef source_list directory_list;
 
 #define shift_args(cnt, args) (assert(cnt > 0), (cnt)--, *(args)++)
 
@@ -26,11 +29,43 @@ typedef std::vector<const char*> source_list;
 # define REBUILD_SELF_AND_WATCH(argc, argv, ...) go_rebuild_self(argc, argv, __FILE__, __VA_ARGS__)
 #endif
 
-#ifndef COMMAND
+#ifndef COMMAND_DEFS
+#define COMMAND_DEFS
 # define COMMAND(...) { cmd_list cmd = { __VA_ARGS__ }; run_command_sync(&cmd); }
+# define COMMAND_ASYNC(...) { cmd_list cmd = { __VA_ARGS__ }; run_command_async(&cmd); }
 #endif
 
-// currently only supporting 
+#ifndef DIR_COMMAND_DEFS
+#define DIR_COMMAND_DEFS
+# ifdef _WIN32
+# error("Not implemented for windows")
+# elif defined (__unix__) || defined (__APPLE__)
+// creation cmds
+#  define CREATE_DIRS(...) COMMAND("mkdir", __VA_ARGS__)
+#  define CREATE_DIRS_ASYNC(...) COMMAND_ASYNC("mkdir", __VA_ARGS__)
+// deletion cmds
+#  define REMOVE_DIR_ASYNC(dir) COMMAND_ASYNC("rm", "-f", dir)
+#  define REMOVE_DIRS_ASYNC(...) COMMAND_ASYNC("rm", "-f", __VA_ARGS__)
+#  define REMOVE_DIR_RECURSIVE(dir) COMMAND("rm", "-rf", dir)
+#  define REMOVE_DIR_RECURSIVE_ASYNC(dir) COMMAND_ASYNC("rm", "-rf", dir)
+#  define REMOVE_DIRS_RECURSIVE(...) COMMAND("rm", "-rf", __VA_ARGS__)
+#  define REMOVE_DIRS_RECURSIVE_ASYNC(...) COMMAND_ASYNC("rm", "-rf", __VA_ARGS__)
+# else
+#  error("Unsupported platform")
+# endif
+#endif
+
+#ifndef FILE_COMMAND_DEFS
+#define FILE_COMMAND_DEFS
+# ifdef _WIN32
+# elif defined (__unix__) || defined (__APPLE__)
+// file creation
+# else
+#  error("Unsupported platform")
+# endif
+#endif
+
+// currently only supporting unix and macos
 #ifndef REBUILD_SELF_PARAMS
 # ifdef _MSVC_LANG
 #  error Implementation for MSVC is missing as of now
@@ -220,6 +255,8 @@ inline int should_rebuild_self(const char *binary, source_list sources)
 
 inline int rename_file(const char *file, const char *new_file)
 {
+    _log(log_level::info, "Renaming %s to %s", file, new_file);
+
     if(rename(file, new_file) < 0)
     {
         _log(log_level::error, "Failed renaming file: %s", strerror(errno));
@@ -227,6 +264,86 @@ inline int rename_file(const char *file, const char *new_file)
     }
 
     return 1;
+}
+
+inline void create_directory(const char *path_to_dir)
+{
+    _log(log_level::info, "Creating directory %s", path_to_dir);
+
+    auto out = mkdir(path_to_dir, S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
+
+    if(out < 0)
+    {
+        if(errno == EEXIST) return;
+
+        _log(log_level::error, "Failed creating directory: %s", strerror(errno));
+        exit(0);
+    }
+}
+
+template<typename ...T>
+inline void create_directories(T... args)
+{
+    directory_list dirs = { args... };
+
+    for(const auto& dir : dirs)
+    {
+        create_directory(dir);
+    }
+}
+
+inline void remove_directory(const char *path_to_dir)
+{
+    _log(log_level::info, "Removing directory %s", path_to_dir);
+
+    auto out = rmdir(path_to_dir);
+
+    if(out < 0)
+    {
+        _log(log_level::error, "Failed removing directory: %s", strerror(errno));
+        exit(0);
+    }
+}
+
+template<typename ...T>
+inline void remove_directories(T... args)
+{
+    directory_list dirs = { args... };
+
+    for(const auto& dir : dirs)
+    {
+        remove_directory(dir);
+    }
+}
+
+inline void remove_file(const char *file)
+{
+    _log(log_level::info, "Removing file %s", file);
+
+    auto out = unlink(file);
+
+    if(out < 0)
+    {
+        _log(log_level::error, "Failed to remove file: %s", strerror(errno));
+        exit(0);
+    }
+}
+
+template<typename... T>
+inline void remove_files(T... args)
+{
+    source_list files = { args... };
+
+    for(const auto& file : files)
+    {
+        remove_file(file);
+    }
+}
+
+inline bool file_exists(const char *file)
+{
+    struct stat buffer;
+    return (stat (file, &buffer) == 0);
 }
 
 inline void _log(log_level lvl, const char* fmt, ...)
