@@ -2,11 +2,17 @@
 
 Nob is a inspiration base on the [nob.h](https://github.com/tsoding/nob.h.git) written by Tsoding. I take 0 credit for most of the code written here I just wanted to see I can recreate the buildsystem and understand how it works but here using c++ instead of c. 
 
-## What is it
+## What are the use cases?
 
-Essentialy it is a no-build system concept where the only thing you need to build your project is `nob.h`, a c++ compiler and knowlage of the c++ language.
+Nob is a small single header library, with just enough tooling, to quickly iterate on small projects like commandline tools.
 
-However nob is mostlikely not suitable for you if you are relying on external dependencies, via CMake. It's mostly a helper tool to run commands in the shell for you.
+What does that look like? Add in the header, use the macro, build the executable once, **and off you go!**
+
+**No need to recompile!** When writting new code, running the executable will automaticlay reompile it and run the new version.
+
+**Well what if I add new source file?** No problem, add them to the list of files in the `REBUILD_SELF_AND_WATCH` macro, running the executable again will automaticaly build with the new files. This will work almost always, except if the file path is messedup, then the executable will need to be hand recompiled.
+
+**What about testing?** Just create a new main file, create your test cases and call your program from within it via nobs `COMMAND` macro. With it you also get the benefit of automatical recompilation. You can also take advantage of nobs logging functions to print out success or failure of different tests (tho the API is currently not exposed, only via `_log` function)
 
 ## How to use nob
 
@@ -36,13 +42,15 @@ COMMAND("g++", "-Wall", "-Werror", "-o", "out", "foo.cpp");
 //... and so on
 ```
 
-## TODO
+Aditionaly you can specify a list of dependencies that should be in the watch list via a macro:
 
-- [x] Rebuild self macro.
-- [x] Command macros.
-- [ ] Create directory macros.
-- [ ] Remove directory macros.
-- [ ] Remove directory recursive macros.
-- [ ] Delete file macros.
+```cpp
+#define BUILD_WATCH_LIST "./path/to/file", "../path/to/file2"
+```
 
-**More features are to come**
+If you would like to add more build flags to the defualt build command use the `BUILD_ADDITIONAL_FLAGS` macro:
+
+```cpp
+#define BUILD_ADDITIONAL_FLAGS "-lpython3.8"
+```
+

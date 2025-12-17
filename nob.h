@@ -9,6 +9,7 @@
 #pragma once
 #include <assert.h>
 #include <cerrno>
+#include <cstdarg>
 #include <cstring>
 #include <iostream>
 #include <string>
@@ -23,6 +24,14 @@ typedef std::vector<const char*> source_list;
 typedef source_list directory_list;
 
 #define shift_args(cnt, args) (assert(cnt > 0), (cnt)--, *(args)++)
+
+#ifndef BUILD_WATCH_LIST
+#define BUILD_WATCH_LIST
+#endif
+
+#ifndef BUILD_ADDITIONAL_FLAGS
+#define BUILD_ADDITIONAL_FLAGS 
+#endif
 
 #ifndef REBUILD_SELF
 # define REBUILD_SELF(argc, argv) go_rebuild_self(argc, argv, __FILE__)
@@ -70,9 +79,9 @@ typedef source_list directory_list;
 # ifdef _MSVC_LANG
 #  error Implementation for MSVC is missing as of now
 # elif defined(__clang__)
-#  define REBUILD_SELF_PARAMS(target, src) "clang++", "-Wall", "-Werror", "-Wpedantic", "-std=c++17", "-o", target, src
+#  define REBUILD_SELF_PARAMS(target, src) "clang++", "-Wall", "-Wpedantic", "-std=c++23",  "-o", target, src
 # elif defined(__GXX_ABI_VERSION)
-#  define REBUILD_SELF_PARAMS(target, src) "g++", "-Wall", "-Werror", "-Wpedantic", "-std=c++17", "-o", target, src
+#  define REBUILD_SELF_PARAMS(target, src) "g++", "-Wall", "-Wpedantic", "-std=c++23", "-o", target, src
 # endif
 #endif
 
@@ -96,7 +105,8 @@ template<typename... T>
 inline void go_rebuild_self(int argc, char **argv, const char* source_file, T... args)
 {
     const char *binary_path = shift_args(argc, argv);
-    source_list sources = { args... };
+    source_list sources = { BUILD_WATCH_LIST };
+    source_list sources_without_main = { args... };
     sources.push_back(source_file);
 
     int rebuild_needed = should_rebuild_self(binary_path, sources);
@@ -116,9 +126,18 @@ inline void go_rebuild_self(int argc, char **argv, const char* source_file, T...
     }
 
     cmd_list cmd = { REBUILD_SELF_PARAMS(binary_path, source_file) };
+    cmd.insert(cmd.end(), { BUILD_ADDITIONAL_FLAGS });
+    cmd.insert(cmd.end(), { args... });
     if(run_command_sync(&cmd) < 0)
     {
         _log(log_level::error, "Error while trying to rebuild self");
+
+        if(rename_file(old_binary_path.c_str(), binary_path) < 0)
+        {
+            _log(log_level::error, "Error while trying to rename file to .old");
+            exit(1);
+        }
+
         exit(1);
     }
 
