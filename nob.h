@@ -33,6 +33,16 @@ typedef source_list directory_list;
 #define BUILD_ADDITIONAL_FLAGS 
 #endif
 
+#ifndef BUILD_CUSTOM_COMMAND
+# ifdef _MSVC_LANG
+#  error Implementation for MSVC is missing as of now
+# elif defined(__clang__)
+#  define BUILD_CUSTOM_COMMAND "clang++"
+# elif defined(__GXX_ABI_VERSION)
+#  define BUILD_CUSTOM_COMMAND "g++"
+# endif
+#endif
+
 #ifndef REBUILD_SELF
 # define REBUILD_SELF(argc, argv) go_rebuild_self(argc, argv, __FILE__)
 # define REBUILD_SELF_AND_WATCH(argc, argv, ...) go_rebuild_self(argc, argv, __FILE__, __VA_ARGS__)
@@ -41,7 +51,7 @@ typedef source_list directory_list;
 #ifndef COMMAND_DEFS
 #define COMMAND_DEFS
 # define COMMAND(...) { cmd_list cmd = { __VA_ARGS__ }; run_command_sync(&cmd); }
-# define COMMAND_ASYNC(...) { cmd_list cmd = { __VA_ARGS__ }; run_command_async(&cmd); }
+# define COMMAND_ASYNC(...) { cmd_list cmd = { __VA_ARGS__ }; run_command_async(&cmd); 0
 #endif
 
 #ifndef DIR_COMMAND_DEFS
@@ -79,9 +89,9 @@ typedef source_list directory_list;
 # ifdef _MSVC_LANG
 #  error Implementation for MSVC is missing as of now
 # elif defined(__clang__)
-#  define REBUILD_SELF_PARAMS(target, src) "clang++", "-Wall", "-Wpedantic", "-std=c++23",  "-o", target, src
+#  define REBUILD_SELF_PARAMS(target, src) BUILD_CUSTOM_COMMAND, "-Wall", "-Wpedantic", "-std=c++20",  "-o", target, src
 # elif defined(__GXX_ABI_VERSION)
-#  define REBUILD_SELF_PARAMS(target, src) "g++", "-Wall", "-Wpedantic", "-std=c++23", "-o", target, src
+#  define REBUILD_SELF_PARAMS(target, src) BUILD_CUSTOM_COMMAND, "-Wall", "-Wpedantic", "-std=c++20", "-o", target, src
 # endif
 #endif
 
@@ -108,6 +118,11 @@ inline void go_rebuild_self(int argc, char **argv, const char* source_file, T...
     source_list sources = { BUILD_WATCH_LIST };
     source_list sources_without_main = { args... };
     sources.push_back(source_file);
+    sources.insert(
+            sources.end(),
+            sources_without_main.begin(),
+            sources_without_main.end()
+        );
 
     int rebuild_needed = should_rebuild_self(binary_path, sources);
     if(rebuild_needed < 0)
